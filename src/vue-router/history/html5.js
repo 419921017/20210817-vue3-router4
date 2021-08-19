@@ -1,0 +1,170 @@
+export function createWebHistory(base = '') {
+  // 1. 当前路径
+  // 2. 路径状态
+  // 3. 切换路径的方法
+
+  const historyNavigation = useHistoryStateNavigation(base);
+
+  const historyListeners = useHistoryListener(
+    base,
+    historyNavigation.state,
+    historyNavigation.location
+  );
+
+  const routerHistory = Object.assign({}, historyNavigation, historyListeners);
+
+  Object.defineProperty(routerHistory, 'location', {
+    get: () => historyNavigation.location.value,
+  });
+
+  Object.defineProperty(routerHistory, 'state', {
+    get: () => historyNavigation.state.value,
+  });
+
+  return routerHistory;
+}
+
+function useHistoryStateNavigation(base) {
+  const currentLocation = {
+    value: createCurrentLocation(base),
+  };
+  const historyState = {
+    value: window.history.state,
+  };
+  // 状态初始化, 需要自己维护
+  // 后退路径 prev
+  // 当前路径 current
+  // 下一个路径 next
+  // 跳转方法 method
+  // 跳转后的滚动条位置
+  console.log(window.history.state);
+  if (!window.history.state) {
+    console.log(!window.history.state, currentLocation);
+    changeLocation(
+      currentLocation.value,
+      buildState(null, currentLocation.value, null, true),
+      true
+    );
+  }
+
+  function changeLocation(to, state, replace) {
+    const hasPos = base.indexOf('#');
+    const url = hasPos > -1 ? base + to : to;
+    window.history[replace ? 'replaceState' : 'pushState'](state, null, url);
+    historyState.value = state;
+  }
+
+  function push(to, data) {
+    // 跳转前
+    const currentState = Object.assign({}, historyState.value, {
+      forward: to,
+      scroll: {
+        left: window.pageXOffset,
+        top: window.pageYOffset,
+      },
+    });
+    // 本质没有跳转, 只是更新了状态
+    changeLocation(currentState.current, currentState, true);
+
+    // 跳转后
+    const state = Object.assign(
+      {},
+      buildState(currentLocation.value, to, null),
+      {
+        position: currentState.position + 1,
+      },
+      data
+    );
+    // 真正的更改路径
+    changeLocation(to, state, false);
+    currentLocation.value = to;
+  }
+
+  function replace(to, data) {
+    const state = Object.assign(
+      {},
+      buildState(
+        historyState.value.back,
+        to,
+        historyState.value.forward,
+        false
+      ),
+      data
+    );
+    changeLocation(to, state, true);
+    // 替换后要将路径变为现在的路径
+    currentLocation.value = to;
+  }
+  return {
+    location: currentLocation,
+    state: historyState,
+    push,
+    replace,
+  };
+}
+function createCurrentLocation(base) {
+  const { pathname, search, hash } = window.location;
+  const hasPos = base.indexOf('#');
+  if (hasPos > -1) {
+    // 去除#号
+    return base.slice(1) || '/';
+  }
+  return pathname + search + hash;
+}
+
+function buildState(
+  back,
+  current,
+  forward,
+  replace = false,
+  computedScroll = false
+) {
+  return {
+    back,
+    current,
+    forward,
+    replace,
+    scroll: computedScroll
+      ? {
+          left: window.pageXOffset,
+          top: window.pageYOffset,
+        }
+      : null,
+    // history的length从2开始, 所以要-1
+    position: window.history.length - 1,
+  };
+}
+
+// 前进后退的时候, 需要更新historyState和currentLocation两个值
+function useHistoryListener(base, historyState, currentLocation) {
+  let listeners = [];
+
+  const popStateHandler = ({ state }) => {
+    const to = createCurrentLocation(base);
+    const from = currentLocation.value;
+    const fromState = historyState.value;
+
+    currentLocation.value = to;
+    // TODO: state可能为空
+    historyState.value = state;
+
+    // 当前的length和form的length进行对比, 看长度
+    let isBack = state.position - fromState.position < 0;
+
+    // console.log('isBack', isBack);
+    listeners.forEach((listener) => {
+      listener(to, from, {
+        isBack,
+      });
+    });
+  };
+
+  // 只能监听浏览器的前进后退
+  window.addEventListener('popstate', popStateHandler);
+
+  function listen(cb) {
+    listeners.push(cb);
+  }
+
+  return { listen };
+}
